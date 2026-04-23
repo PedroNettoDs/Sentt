@@ -1,0 +1,227 @@
+// Schema Prisma do motor Sentt.
+// Modelos derivados da §4 do prompt-motor.md. Bloco §4 completo (WHATSAPP,
+// CONVERSAS, BOT, CAMPANHAS) a partir da Fase 1.3.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------------------------------------------
+// WHATSAPP
+// -----------------------------------------------------------------
+
+enum WhatsAppDriver {
+  BAILEYS
+  CLOUD_API
+}
+
+enum WhatsAppInstanceRole {
+  ATENDIMENTO
+  COLD_OUTREACH
+  BOTH
+}
+
+model WhatsAppInstance {
+  id                Int                  @id @default(autoincrement())
+  name              String               @unique @db.VarChar(80)
+  number            String?              @db.VarChar(20)
+  driver            WhatsAppDriver
+  role              WhatsAppInstanceRole @default(ATENDIMENTO)
+  isPrimary         Boolean              @default(false)
+  isConnected       Boolean              @default(false)
+  lastConnectionAt  DateTime?
+  credentials       Json? // AES-256-GCM ciphertext (base64) para CLOUD_API
+  state             Json? // dados internos do driver
+  metaPhoneNumberId String?              @unique @db.VarChar(80)
+  deletedAt         DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  webhooks           ReceivedWebhook[]
+  messages           Message[]
+  campaignDispatches CampaignDispatch[]
+
+  @@index([role, isPrimary])
+}
+
+model ReceivedWebhook {
+  id                 Int               @id @default(autoincrement())
+  instance           String            @db.VarChar(80) // nome ou phone_number_id
+  eventType          String            @db.VarChar(80)
+  payload            Json
+  headers            Json?
+  processed          Boolean           @default(false)
+  processedAt        DateTime?
+  processingError    String?           @db.Text
+  whatsAppInstanceId Int?
+  whatsAppInstance   WhatsAppInstance? @relation(fields: [whatsAppInstanceId], references: [id], onDelete: Cascade)
+  createdAt          DateTime          @default(now())
+
+  @@index([processed, createdAt])
+}
+
+// -----------------------------------------------------------------
+// CONVERSAS E MENSAGENS
+// -----------------------------------------------------------------
+
+enum ConversationStatus {
+  EM_TRIAGEM
+  EM_ATENDIMENTO
+  FINALIZADA
+}
+
+model Conversation {
+  id            Int                @id @default(autoincrement())
+  phone         String             @db.VarChar(20)
+  status        ConversationStatus @default(EM_TRIAGEM)
+  lastMessageAt DateTime?
+  assignedAt    DateTime?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  messages Message[]
+  botState ConversationBotState?
+
+  @@unique([phone]) // 1 conversa ativa por telefone (§4 bloco CONVERSAS)
+}
+
+enum MessageDirection {
+  IN
+  OUT
+  BOT
+}
+
+enum MessageType {
+  TEXTO
+  IMAGEM
+  AUDIO
+  VIDEO
+  DOCUMENTO
+  TEMPLATE
+  BOT
+}
+
+enum DeliveryStatus {
+  PENDENTE
+  ENVIADA
+  ENTREGUE
+  LIDA
+  FALHA
+}
+
+model Message {
+  id                Int               @id @default(autoincrement())
+  conversationId    Int
+  conversation      Conversation      @relation(fields: [conversationId], references: [id])
+  direction         MessageDirection
+  tipo              MessageType       @default(TEXTO)
+  content           Json // { text?, url?, caption?, templateName?, variables? }
+  deliveryStatus    DeliveryStatus    @default(PENDENTE)
+  providerMessageId String?           @db.VarChar(120)
+  whatsappMetadata  Json?
+  instanceId        Int?
+  instance          WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  sentViaDriver     WhatsAppDriver?
+  routingDecision   String?           @db.VarChar(50)
+  createdAt         DateTime          @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([providerMessageId])
+}
+
+// -----------------------------------------------------------------
+// BOT / FLUXOS
+// -----------------------------------------------------------------
+
+model TriageFlow {
+  id        Int      @id @default(autoincrement())
+  version   Int      @default(1)
+  active    Boolean  @default(false)
+  structure Json // validado por Zod (§6)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active])
+}
+
+model ConversationBotState {
+  id                 Int          @id @default(autoincrement())
+  conversationId     Int          @unique
+  conversation       Conversation @relation(fields: [conversationId], references: [id])
+  currentStep        String       @db.VarChar(80)
+  menuPath           Json         @default("[]")
+  attempts           Int          @default(0)
+  collectedVariables Json?
+  completed          Boolean      @default(false)
+  updatedAt          DateTime     @updatedAt
+}
+
+// -----------------------------------------------------------------
+// CAMPANHAS / AGENDAMENTO
+// -----------------------------------------------------------------
+
+enum CampaignStatus {
+  RASCUNHO
+  AGENDADA
+  EM_ANDAMENTO
+  PAUSADA
+  CONCLUIDA
+  CANCELADA
+}
+
+enum CampaignIntent {
+  ATENDIMENTO
+  COLD_OUTREACH
+  BOTH
+}
+
+model Campaign {
+  id                 Int            @id @default(autoincrement())
+  uuid               String         @unique @default(uuid()) @db.VarChar(40)
+  name               String         @db.VarChar(150)
+  status             CampaignStatus @default(RASCUNHO)
+  intent             CampaignIntent @default(ATENDIMENTO)
+  steps              Json // CampaignStep[] (§7)
+  targetAudience     Json // { type: 'manual_list', phoneList: string[] }
+  trigger            Json? // { type: 'manual', scheduledAt? } ou { type: 'event', event, delayMinutes }
+  availableVariables Json? // [{ key, example }]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  dispatches CampaignDispatch[]
+}
+
+enum DispatchStatus {
+  AGENDADO
+  ENVIADO
+  FALHA
+  CANCELADO
+}
+
+model CampaignDispatch {
+  id              Int               @id @default(autoincrement())
+  campaignId      Int
+  campaign        Campaign          @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  phone           String            @db.VarChar(20)
+  stepNumber      Int
+  status          DispatchStatus    @default(AGENDADO)
+  scheduledFor    DateTime
+  sentAt          DateTime?
+  content         Json? // { providerMessageId }
+  errorMessage    String?           @db.Text
+  instanceId      Int?
+  instance        WhatsAppInstance? @relation(fields: [instanceId], references: [id], onDelete: SetNull)
+  sentViaDriver   WhatsAppDriver?
+  routingDecision String?           @db.VarChar(50)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([campaignId, phone, stepNumber])
+  @@index([status, scheduledFor])
+  @@index([phone, createdAt(sort: Desc)])
+}

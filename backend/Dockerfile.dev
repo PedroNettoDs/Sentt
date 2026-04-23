@@ -1,0 +1,22 @@
+# Dockerfile de desenvolvimento — hot reload via `nest start --watch`
+# Para build de produção, criar Dockerfile separado com multi-stage.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Dependências nativas (argon2 exige)
+RUN apk add --no-cache python3 make g++ wget
+
+# Instalar deps primeiro (camada em cache enquanto package-lock não mudar)
+COPY package.json package-lock.json .npmrc ./
+RUN npm ci --legacy-peer-deps
+
+# Código (sobrescrito por volumes em dev)
+COPY tsconfig.json tsconfig.build.json nest-cli.json eslint.config.mjs ./
+COPY src ./src
+COPY prisma ./prisma
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start:dev"]
