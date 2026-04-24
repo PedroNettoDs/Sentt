@@ -1,10 +1,16 @@
 # whatsapp
 
-> Gateway WhatsApp do motor Sentt — driver-agnostic (Baileys + Cloud API). **Em construção (Fase 3)**.
+> Gateway WhatsApp do motor Sentt — driver-agnostic (Baileys + Cloud API). **Módulo completo (Fase 3).**
 
 ## Responsabilidade
 
 Abstrai a conversa com o WhatsApp atrás de um contrato único (`WhatsAppProvider`). Nenhum outro módulo fala Baileys ou Graph API diretamente — Atendimento e Campanhas pedem `factory.for(instance)` e usam `sendText/sendMedia/...`. O módulo também hospeda os controllers de webhook, os processors BullMQ de inbound/outbound, as guards HMAC/Bearer e o CRUD de instâncias.
+
+## Módulo NestJS
+
+`WhatsappModule` exporta `WhatsAppProviderFactory`, `WhatsAppRouterService`, `InstancesService` e reexporta `BullModule` (para que outros módulos possam fazer `@InjectQueue(QUEUE_WHATSAPP_OUTBOUND)` — usado por `campanhas/`). Registra as filas `whatsapp-inbound` e `whatsapp-outbound` via `BullModule.registerQueue(...)`. Importa `HttpModule` com timeout 15s para os providers HTTP.
+
+Pressupostos externos (AppModule global): `ConfigModule.forRoot({ isGlobal: true })` com Env Zod, `EventEmitterModule.forRoot()`, `BullModule.forRoot({ connection: { host, port, password } })`, `PrismaModule` (`@Global`).
 
 ## Estrutura
 
@@ -35,14 +41,8 @@ whatsapp/
 │   └── instance-response.dto.ts          # toInstanceResponse() — sem ciphertext
 ├── instances.service.ts                  # CRUD + reconnect/disconnect (§5.11)
 ├── instances.controller.ts               # rotas /whatsapp/instances (§5.11)
-└── whatsapp.controller.ts                # POST /webhook Evolution <200ms (§5.7)
-```
-
-_Previsto na última sub-fase do módulo:_
-
-```
-whatsapp/
-└── whatsapp.module.ts                    # providers, controllers, BullModule (§3.11)
+├── whatsapp.controller.ts                # POST /webhook Evolution <200ms (§5.7)
+└── whatsapp.module.ts                    # HttpModule + BullModule.registerQueue + providers/controllers (§10.3)
 ```
 
 ## Arquivos principais
@@ -57,6 +57,7 @@ whatsapp/
 | `routing/whatsapp-router.service.ts` | Roteador com as 10 rotas §5.10 em `dispatch()`. `resolve(params)` e `resolveFallback({...params, excludeInstanceId})`. Filtra `isConnected: true, deletedAt: null`. Tiebreaker `isPrimary DESC, updatedAt DESC`. Nunca lança por ausência de rota — devolve `{ failure, reason }`. |
 | `instances.service.ts` | CRUD de `WhatsAppInstance`: `list/get/create/updateRole/setPrimary/updateCredentials/reconnect/disconnect/softDelete`. `setPrimary` é `$transaction` que zera o primary do role antes de marcar o novo. Toda mutação em Cloud API chama `factory.invalidate(id)`. Credenciais cifradas no create/update via `encryptCredentials()`. (§5.11) |
 | `instances.controller.ts` | 9 rotas REST sob `/api/v1/whatsapp/instances`. Toda saída passa por `toInstanceResponse` — o ciphertext de `credentials` **nunca** vaza. (§5.11) |
+| `whatsapp.module.ts` | Registra `HttpModule` + `BullModule.registerQueue(QUEUE_WHATSAPP_INBOUND/OUTBOUND)`. Providers: drivers, factory, router, `InstancesService`, processors, guards. Exporta `WhatsAppProviderFactory`, `WhatsAppRouterService`, `InstancesService`, `BullModule` (para Campanhas injetar `QUEUE_WHATSAPP_OUTBOUND`). |
 
 ## Convenções e padrões
 

@@ -143,25 +143,28 @@
 > DTOs com `class-validator`/`class-transformer` em `src/whatsapp/dto/` (create/update-role/update-credentials/list/response). `toInstanceResponse()` é o ÚNICO ponto de saída — vaza ciphertext se alguém devolver `WhatsAppInstance` direto.
 
 ### 3.10 Module
-- [ ] `whatsapp.module.ts` — imports, providers, exports (WhatsAppRouterService, factory, providers, Prisma)
-- [ ] **Verificação:** criar instância Baileys → reconnect → QR → escanear → `isConnected=true`
-- [ ] **Ref:** §10.3
+- [x] `whatsapp.module.ts` — imports, providers, exports (WhatsAppRouterService, factory, providers, Prisma)
+- [ ] **Verificação:** criar instância Baileys → reconnect → QR → escanear → `isConnected=true` — _bloqueado até a Fase 1.3 (`prisma migrate dev`) e a infra do §10.6 (docker compose com MySQL + Redis + Evolution API)._
+- [x] **Ref:** §10.3
+
+> Pressupostos do AppModule (ainda não aplicados — Fase 6.1): `ConfigModule.forRoot({ isGlobal: true })`, `EventEmitterModule.forRoot()`, `BullModule.forRoot({ connection })`, `PrismaModule` (`@Global`). Sem eles, o boot falha em runtime (`@InjectQueue`, `EventEmitter2`, `PrismaService`). O typecheck passa.
 
 ---
 
 ## Fase 4 — Módulo Atendimento (bot)
 
 ### 4.1 Messages upsert handler
-- [ ] `handlers/messages-upsert.handler.ts` — `@OnEvent('whatsapp.messages.upsert')`: cria/atualiza `Conversation` + `Message`, emite `message.created`
-- [ ] **Ref:** §10.4
+- [x] `handlers/messages-upsert.handler.ts` — `@OnEvent('whatsapp.messages.upsert')`: cria/atualiza `Conversation` + `Message`, emite `message.created`
+- [x] **Ref:** §10.4
 
 ### 4.2 Bot service (state machine)
-- [ ] `bot/bot.service.ts` — `@OnEvent('message.created')`, só processa IN em `EM_TRIAGEM` + `botState` não completed
-- [ ] `runUntilWait` com `MAX_STEP_DEPTH=20` + detecção de loop
-- [ ] Despachantes: `message` (auto-next), `menu` (bloqueante), `collect` (bloqueante), `condition` (avalia e avança), `route` (handoff + markCompleted)
-- [ ] `processStepInput` — trata input de menu (match por key) e collect (validator + retries + failStep)
-- [ ] Helpers: `evaluate`, `validateCollect` (any/phone/email/regex), `renderMenu`, `handoff` (muda status → `EM_ATENDIMENTO`, emite `conversation.assigned`), `sendBot` (cria Message direction=BOT + enfileira outbound)
-- [ ] **Ref:** §6.3
+- [x] `bot/bot.service.ts` — `@OnEvent('message.created')`, só processa IN em `EM_TRIAGEM` + `botState` não completed
+- [x] `runUntilWait` com `MAX_STEP_DEPTH=20` + detecção de loop
+- [x] Despachantes: `message` (auto-next), `menu` (bloqueante), `collect` (bloqueante), `condition` (avalia e avança), `route` (handoff + markCompleted)
+- [x] `processStepInput` — trata input de menu (match por key) e collect (validator + retries + failStep)
+- [x] Helpers: `evaluate`, `validateCollect` (any/phone/email/regex), `renderMenu`, `handoff` (muda status → `EM_ATENDIMENTO`, emite `conversation.assigned`), `sendBot` (cria Message direction=BOT + enfileira outbound)
+- [x] **Ref:** §6.3
+- [x] **Nota:** `TriageFlowService` criado como stub com apenas `getActive()` — CRUD + simulate entram na 4.3
 
 ### 4.3 Triage flow service + controller
 - [ ] `bot/triage-flow.service.ts` — CRUD + `getActive()` + `simulate(structure, userInputs)` em memória
